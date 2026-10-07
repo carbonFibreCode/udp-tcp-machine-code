@@ -1,79 +1,34 @@
 """
-UDP heartbeat client / health checker.
+Heartbeat client: send a heartbeat, wait for the reply, sleep 1 s, repeat.
 
-Sends a heartbeat every second and waits for the reply:
-  * timeout on every receive (UDP can silently lose packets)
-  * sequence numbers to match replies to requests and ignore late ones
-  * RTT and packet-loss statistics
-  * marks the server DOWN after 3 consecutive missed heartbeats, and UP again on recovery
+Key points to say to the SRE:
+  * timeout on recv -> UDP can lose packets, never wait forever
+  * sequence number -> know WHICH heartbeat the reply belongs to
+  * 3 misses in a row -> mark server DOWN (that's a health check)
 
-Run:  python3 udp_heartbeat_client.py [port] [host] [count]
+Run:  python3 udp_heartbeat_client.py     (kill the server to see DOWN)
 """
 import socket
-import sys
 import time
 
-TIMEOUT_S = 1.0
-INTERVAL_S = 1.0
-DOWN_AFTER_MISSES = 3
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.settimeout(1.0)
+seq = 0
+misses = 0
 
-
-def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 9003
-    host = sys.argv[2] if len(sys.argv) > 2 else "127.0.0.1"
-    count = int(sys.argv[3]) if len(sys.argv) > 3 else 0          # 0 = forever
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(TIMEOUT_S)
-    sent = received = consecutive_misses = 0
-    rtts = []
-    seq = 0
+while True:
+    seq += 1
+    start = time.time()
+    sock.sendto(f"HEARTBEAT {seq}".encode(), ("127.0.0.1", 9003))
     try:
-        while count == 0 or seq < count:
-            seq += 1
-            start = time.monotonic()                              # monotonic: immune to clock changes
-            sock.sendto(f"PING {seq}".encode(), (host, port))
-            sent += 1
-            got = False
-            while True:
-                remaining = TIMEOUT_S - (time.monotonic() - start)
-                if remaining <= 0:
-                    break
-                sock.settimeout(remaining)
-                try:
-                    data, _ = sock.recvfrom(1024)
-                except socket.timeout:
-                    break
-                except ConnectionRefusedError:                     # ICMP port unreachable (server not running)
-                    break
-                if data.decode(errors="replace").strip() == f"PONG {seq}":
-                    got = True
-                    break                                          # else: stale reply to an old seq, keep waiting
-
-            if got:
-                rtt = (time.monotonic() - start) * 1000
-                rtts.append(rtt)
-                received += 1
-                if consecutive_misses >= DOWN_AFTER_MISSES:
-                    print("*** server is back UP")
-                consecutive_misses = 0
-                print(f"seq={seq} rtt={rtt:.2f} ms")
-            else:
-                consecutive_misses += 1
-                print(f"seq={seq} TIMEOUT")
-                if consecutive_misses == DOWN_AFTER_MISSES:
-                    print(f"*** server DOWN ({DOWN_AFTER_MISSES} heartbeats missed)")
-            time.sleep(INTERVAL_S)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loss = 100 * (sent - received) / sent if sent else 0
-        print(f"\n{sent} sent, {received} received, {loss:.1f}% loss", end="")
-        if rtts:
-            print(f", rtt min/avg/max = {min(rtts):.2f}/{sum(rtts)/len(rtts):.2f}/{max(rtts):.2f} ms")
-        else:
-            print()
-
-
-if __name__ == "__main__":
-    main()
+        data, _ = sock.recvfrom(1024)
+        if data.decode() == f"HEARTBEAT {seq}":
+            rtt = (time.time() - start) * 1000
+            print(f"seq={seq} alive, rtt={rtt:.2f} ms")
+            misses = 0
+    except (socket.timeout, ConnectionRefusedError):     # no reply in 1 s / server not running
+        misses += 1
+        print(f"seq={seq} no reply")
+        if misses == 3:
+            print("*** server is DOWN")
+    time.sleep(1)

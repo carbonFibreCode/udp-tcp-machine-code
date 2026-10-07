@@ -1,14 +1,11 @@
 """
-Multi-client TCP echo server.
+Step 1 of EVERY Media.net machine-coding task: a multi-client TCP echo server.
+Everything else (KV store, chat server) is this file + a protocol on top.
 
-One thread per client; newline-delimited messages (TCP is a byte stream,
-so lines are used for message framing).
-
-Run:   python3 echo_server.py 9000
-Test:  nc localhost 9000      (open several terminals)
+Run:   python3 echo_server.py
+Test:  telnet localhost 9000      (or: nc localhost 9000)
 """
 import socket
-import sys
 import threading
 
 
@@ -25,12 +22,11 @@ def handle_client(conn: socket.socket, addr):
 
 
 def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 9000
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)          # IPv4 + TCP
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)         # restart without "Address already in use"
-    srv.bind(("0.0.0.0", port))
+    srv.bind(("0.0.0.0", 9000))
     srv.listen()
-    print(f"echo server listening on :{port}")
+    print("echo server listening on :9000")
     try:
         while True:
             conn, addr = srv.accept()                                 # blocks until a client connects
