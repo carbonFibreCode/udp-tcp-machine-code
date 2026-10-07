@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+# runtime data
+kv.aof
+chat_history.jsonl
+chat_history.jsonl.tmp
